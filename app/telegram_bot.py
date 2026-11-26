@@ -133,6 +133,9 @@ class Bot:
         log.warning("Telegram bot @%s started (allowed users: %s)", me.get("username"),
                     sorted(C.TELEGRAM_ALLOWED) or "none yet")
         await self.call("setMyCommands", commands=COMMANDS)
+        for uid in C.TELEGRAM_NOTIFY:
+            await self.call("sendMessage", chat_id=uid, disable_notification=False,
+                            text=f"🟢 起動しました（{time.strftime('%m/%d %H:%M')}）。画像の生成・編集を受け付けています。")
         offset = None
         while True:
             try:

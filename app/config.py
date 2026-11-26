@@ -48,6 +48,12 @@ _allowed = _get("telegram_allowed_users", [])
 if isinstance(_allowed, str):
     _allowed = [x for x in _allowed.replace(" ", "").split(",") if x]
 TELEGRAM_ALLOWED = {int(x) for x in _allowed}
+# Who gets a "the bot is up" message when the app starts (e.g. after the PC rebooted).
+# Default: the first allowed user (the owner). [] turns the notice off.
+_notify = _get("telegram_notify_users", [int(_allowed[0])] if _allowed else [])
+if isinstance(_notify, str):
+    _notify = [x for x in _notify.replace(" ", "").split(",") if x]
+TELEGRAM_NOTIFY = [int(x) for x in _notify]
 
 # Component files (relative to MODEL_ROOT). These IDs double as sd-server
 # model-file IDs because MODEL_ROOT is the first --model-dir root.

@@ -108,6 +108,7 @@ Bot はロングポーリングで動くため、ルーターのポート開放�
 | `ollama_url` | `http://127.0.0.1:11434` | プロンプト強化に使う Ollama |
 | `telegram_token` | `""` | Telegram Bot のトークン |
 | `telegram_allowed_users` | `[]` | Bot の利用を許可する Telegram ユーザーID |
+| `telegram_notify_users` | 許可リストの先頭のID | アプリ起動時に「🟢 起動しました」を送る相手（`[]` で通知しない） |
 
 画質プリセット（UI と Telegram で切り替え）:
 
