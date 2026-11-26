@@ -136,6 +136,7 @@ class Bot:
         for uid in C.TELEGRAM_NOTIFY:
             await self.call("sendMessage", chat_id=uid, disable_notification=False,
                             text=f"🟢 起動しました（{time.strftime('%m/%d %H:%M')}）。画像の生成・編集を受け付けています。")
+        await self.mark_interrupted()
         offset = None
         while True:
             try:
@@ -259,10 +260,18 @@ class Bot:
         if reply_to:
             params["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
         status = await self.call("sendMessage", **params)
+        if status:
+            # Remember the progress message, so that after an app restart it can be
+            # marked as interrupted instead of showing "準備中" forever.
+            self.state.setdefault("_pending", {})[mid] = {
+                "chat": chat_id, "msg": status["message_id"], "cid": cid, "verb": verb}
+            self.save_state()
         last_text, last_edit = "", 0.0
         while mid in self.S.LIVE:
             live = self.S.LIVE.get(mid) or {}
             label = STAGE_JA.get(live.get("stage") or live.get("status"), "処理中")
+            if live.get("stage") == "queued" and self.S.WARM.get("state") == "running":
+                label = "起動直後のため、モデルを読み込み中（初回だけ1〜2分かかります）"
             if live.get("stage") == "sampling" and live.get("total"):
                 done, total = live.get("completed") or 0, live["total"]
                 label = f"生成中 {'▓' * done}{'░' * (total - done)} {done}/{total}" if total <= 12 else \
@@ -277,6 +286,8 @@ class Bot:
                 await self.call("sendChatAction", chat_id=chat_id, action="upload_photo")
             await asyncio.sleep(1.5)
 
+        if self.state.get("_pending", {}).pop(mid, None):
+            self.save_state()
         conv = self.S.load_conv(cid)
         m = next((x for x in conv["messages"] if x["id"] == mid), None)
         ok = bool(m and m.get("status") == "done" and m.get("images"))
@@ -309,6 +320,18 @@ class Bot:
             await self.call("editMessageText", chat_id=chat_id, message_id=status["message_id"],
                             text=(f"✅ 画像の{verb}が完了しました（{meta.get('total_seconds')}秒）" if sent else
                                   f"⚠️ 画像の{verb}は完了しましたが、送信に失敗しました。Web UI の履歴から確認できます。"))
+
+    async def mark_interrupted(self) -> None:
+        """Progress messages of jobs that were running when the app stopped: say so, offer a retry."""
+        pending = self.state.pop("_pending", {})
+        if not pending:
+            return
+        self.save_state()
+        for mid, p in pending.items():
+            kb = {"inline_keyboard": [[{"text": "↻ やり直す", "callback_data": f"r|{p['cid']}|{mid}"}]]}
+            await self.call("editMessageText", chat_id=p["chat"], message_id=p["msg"], reply_markup=kb,
+                            text=f"⚠️ アプリの再起動で、画像の{p['verb']}が中断されました。"
+                                 "下のボタンでやり直すか、もう一度送ってください。")
 
     async def on_callback(self, q: dict) -> None:
         user_id = q["from"]["id"]

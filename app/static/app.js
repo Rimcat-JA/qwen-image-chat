@@ -36,9 +36,11 @@ async function refreshStatus() {
     state.settings = s.settings;
     const ok = s.sd.ok;
     box.className = "status " + (ok ? "ok" : "bad");
-    box.querySelector(".status-text").textContent = ok
-      ? "画像エンジン稼働中" + (s.ollama ? " · LLM利用可" : "")
-      : "画像エンジン起動中…（数十秒かかります）";
+    box.querySelector(".status-text").textContent = !ok
+      ? "画像エンジン起動中…（数十秒かかります）"
+      : s.warm === "running"
+        ? "モデルを読み込み中…（起動直後だけ1〜2分）"
+        : "画像エンジン稼働中" + (s.ollama ? " · LLM利用可" : "");
     $("#llmToggle").disabled = !s.ollama;
     $("#llmToggle").parentElement.title = s.ollama
       ? "ローカルLLMで指示文を詳しいプロンプトに書き換えます"

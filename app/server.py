@@ -5,6 +5,7 @@ import asyncio
 import base64
 import io
 import json
+import logging
 import math
 import random
 import time
@@ -322,9 +323,43 @@ def user_history(conv: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------- API
+log = logging.getLogger("app")
+WARM: dict = {"state": "idle"}
+
+
+async def warm_up() -> None:
+    """Make the first real job after a (re)start as fast as the others.
+
+    sd-server reads its ~13 GB of weights lazily, on the first job, which made that
+    job take ~2.5 min instead of ~30 s. A tiny 256x256, 1-step edit with a gray
+    reference image touches every part (text encoder + vision tower, DiT, VAE
+    encode/decode), so all weights are loaded before anyone is waiting for them.
+    Real jobs queue behind it on GPU_LOCK.
+    """
+    if not C.WARMUP or not await sdserver.ensure_running():
+        return
+    WARM["state"] = "running"
+    t0 = time.time()
+    try:
+        async with GPU_LOCK:
+            from PIL import Image
+            buf = io.BytesIO()
+            Image.new("RGB", (256, 256), (128, 128, 128)).save(buf, "PNG")
+            payload = build_payload("a plain gray square", [], 256, 256, 1, sdserver.current_model, False)
+            payload["ref_images"] = ["data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()]
+            payload["sample_params"].update(sample_steps=1, custom_sigmas=[1.0, 0.0])
+            payload["embed_image_metadata"] = False
+            j = await sd_generate(payload, {}, t0)
+            log.warning("warm-up %s in %.0f s", j.get("status"), time.time() - t0)
+    except Exception as e:  # noqa: BLE001
+        log.warning("warm-up failed: %s", e)
+    finally:
+        WARM.update(state="done", seconds=round(time.time() - t0, 1))
+
+
 @app.on_event("startup")
 async def _start_engine() -> None:
-    asyncio.create_task(sdserver.ensure_running())
+    asyncio.create_task(warm_up() if C.WARMUP else sdserver.ensure_running())
     asyncio.create_task(sdserver.watchdog(lambda: GPU_LOCK.locked()))
 
 
@@ -354,7 +389,7 @@ async def _mark_interrupted() -> None:
 @app.get("/api/status")
 async def api_status():
     sd, ol = await asyncio.gather(sd_status(), ollama_available())
-    return {"sd": sd, "ollama": ol, "settings": C.load_settings(),
+    return {"sd": sd, "ollama": ol, "settings": C.load_settings(), "warm": WARM.get("state"),
             "models": {k: (C.MODEL_ROOT / v).exists() for k, v in C.MODELS.items()}}
 
 

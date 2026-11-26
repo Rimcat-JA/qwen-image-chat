@@ -50,8 +50,28 @@ def command(model: str = "turbo") -> list[str]:
         # freed VRAM lets the DiT keep its prefix KV cache, which makes edits ~25 s faster.
         "--backend", "te=cpu",
         "--vae-tiling",
+        "--mmap",
         "--listen-ip", C.SD_HOST, "--listen-port", str(C.SD_PORT),
     ]
+
+
+def prefetch(model: str) -> float:
+    """Read the weight files once, sequentially, so they sit in the OS file cache.
+
+    sd-server reads tensors in many small pieces. From a cold cache that ran at only
+    20-70 MB/s even on an NVMe SSD (5 min to load ~14 GB), while one big sequential
+    read does 2 GB/s. Reading the files first makes sd-server's own load hit the cache.
+    """
+    t = time.time()
+    m = C.MODEL_ROOT
+    for rel in (C.MODELS[model], C.LLM, C.LLM_VISION, C.VAE):
+        try:
+            with open(m / rel, "rb", buffering=0) as f:
+                while f.read(64 * 1024 * 1024):
+                    pass
+        except OSError as e:
+            log.warning("prefetch %s: %s", rel, e)
+    return time.time() - t
 
 
 async def ensure_running(model: str | None = None, timeout: float = 90) -> bool:
@@ -88,6 +108,7 @@ async def ensure_running(model: str | None = None, timeout: float = 90) -> bool:
         out = open(logs / "sd-server.log", "ab")
         out.write(f"\n===== start {time.ctime()} =====\n".encode())
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        log.warning("prefetched %s weights in %.0f s", want, await asyncio.to_thread(prefetch, want))
         log.warning("starting sd-server")
         _proc = subprocess.Popen(command(want), cwd=str(C.SDCPP_DIR), stdout=out, stderr=subprocess.STDOUT,
                                  creationflags=flags)
