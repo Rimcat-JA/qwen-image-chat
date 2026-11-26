@@ -1,0 +1,9 @@
+{
+  "model_root": "models/qwen-image-2.1",
+  "sdcpp_dir": "bin/sdcpp",
+  "app_port": 7860,
+  "sd_port": 1234,
+  "ollama_url": "http://127.0.0.1:11434",
+  "telegram_token": "",
+  "telegram_allowed_users": []
+}

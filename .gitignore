@@ -1,0 +1,16 @@
+# runtime data (chats, generated images, settings)
+data/
+# models and binaries are downloaded by setup.ps1
+models/
+bin/
+# machine-specific config (may contain the Telegram token)
+local.json
+# python
+.venv/
+app/.venv/
+__pycache__/
+*.pyc
+# editor / tooling
+.claude/
+.vscode/
+*.log
