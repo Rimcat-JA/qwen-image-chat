@@ -276,12 +276,18 @@ class Bot:
 
         conv = self.S.load_conv(cid)
         m = next((x for x in conv["messages"] if x["id"] == mid), None)
+        ok = bool(m and m.get("status") == "done" and m.get("images"))
+        meta = (m or {}).get("meta", {})
+        # Keep the progress message and turn it into a final status line (not deleted),
+        # so the chat shows what happened even before the photo upload finishes.
+        final = (f"✅ 画像の{verb}が完了しました（{meta.get('total_seconds')}秒）。画像を送信します…" if ok
+                 else "⚠️ " + ((m or {}).get("text") or f"{verb}に失敗しました"))
         if status:
-            await self.call("deleteMessage", chat_id=chat_id, message_id=status["message_id"])
-        if not m or m.get("status") != "done" or not m.get("images"):
-            await self.call("sendMessage", chat_id=chat_id, text="⚠️ " + ((m or {}).get("text") or "生成に失敗しました"))
+            await self.call("editMessageText", chat_id=chat_id, message_id=status["message_id"], text=final)
+        elif not ok:
+            await self.call("sendMessage", chat_id=chat_id, text=final)
+        if not ok:
             return
-        meta = m.get("meta", {})
         caption = (f"{'✏️ 編集' if meta.get('mode') == 'edit' else '🎨 生成'} · {meta.get('width')}×{meta.get('height')}"
                    f" · {'Base' if meta.get('model') == 'base' else 'Turbo'} · {meta.get('total_seconds')}秒")
         kb = {"inline_keyboard": [[
@@ -294,8 +300,12 @@ class Bot:
         sent = await self.call("sendPhoto", chat_id=chat_id, caption=caption, reply_markup=json.dumps(kb),
                                _files={"photo": (path.name, path.read_bytes(), "image/png")})
         if not sent:  # e.g. too large for a photo: fall back to a file
-            await self.call("sendDocument", chat_id=chat_id, caption=caption, reply_markup=json.dumps(kb),
-                            _files={"document": (path.name, path.read_bytes(), "image/png")})
+            sent = await self.call("sendDocument", chat_id=chat_id, caption=caption, reply_markup=json.dumps(kb),
+                                   _files={"document": (path.name, path.read_bytes(), "image/png")})
+        if status:
+            await self.call("editMessageText", chat_id=chat_id, message_id=status["message_id"],
+                            text=(f"✅ 画像の{verb}が完了しました（{meta.get('total_seconds')}秒）" if sent else
+                                  f"⚠️ 画像の{verb}は完了しましたが、送信に失敗しました。Web UI の履歴から確認できます。"))
 
     async def on_callback(self, q: dict) -> None:
         user_id = q["from"]["id"]
