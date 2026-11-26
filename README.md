@@ -88,6 +88,14 @@ VRAM 16GB、RAM 32GB を推奨します。重みは RAM に置き、必要な分
 
 Bot はロングポーリングで動くため、ルーターのポート開放は不要です。Telegram の会話は Web UI の履歴にも表示されます。
 
+## PC の起動時に自動で動かす
+
+`install-autostart.bat` を一度実行すると、Windows にログインした約30秒後に、アプリ（Web UI・Telegram Bot・画像エンジン）がウィンドウなしで起動します。タスク スケジューラに `QwenImageChat` という名前で登録されます。管理者権限は不要です。
+
+- 出力は `data\logs\app.log` に記録されます。
+- 止めるときは `stop.bat`、自動起動をやめるときは `uninstall-autostart.bat` を実行します。
+- プロンプト強化に使う Ollama は、インストール時にスタートアップへ登録されるので、そのままで一緒に起動します。
+
 ## 設定（local.json）
 
 `local.json` は初回の `setup.bat` 実行時に `local.example.json` から作られます。Git の管理対象外です。
@@ -121,6 +129,8 @@ app/
   config.py        パス・解像度・サンプリング設定
   static/          チャット UI（HTML/CSS/JS）
 setup.ps1 / start.ps1 / allow-lan.ps1   セットアップ・起動・LAN許可
+install-autostart.ps1 / uninstall-autostart.ps1   ログイン時の自動起動の登録・解除
+stop.bat           アプリと画像エンジンの停止
 ```
 
 ## ライセンスとクレジット

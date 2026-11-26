@@ -1,6 +1,6 @@
 ﻿# Qwen Image Chat を起動します（画像エンジン sd-server + チャットアプリ）。
 # 使い方: start.bat をダブルクリック、または  powershell -ExecutionPolicy Bypass -File start.ps1
-param([switch]$NoBrowser)
+param([switch]$NoBrowser, [string]$LogFile)
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 Set-Location $Root
@@ -52,4 +52,16 @@ Write-Host "==============================================="
 if (-not $NoBrowser) {
     Start-Job -ScriptBlock { param($u) Start-Sleep 3; Start-Process $u } -ArgumentList "http://localhost:$AppPort" | Out-Null
 }
-& $Python -m uvicorn server:app --app-dir "$Root\app" --host 0.0.0.0 --port $AppPort --ws none --log-level warning
+# uvicorn writes its normal logs to stderr. Under "Stop", Windows PowerShell 5.1 turns
+# redirected stderr lines into errors and aborts, so relax it from here on.
+$ErrorActionPreference = "Continue"
+$uv = "-m uvicorn server:app --app-dir `"$Root\app`" --host 0.0.0.0 --port $AppPort --ws none --log-level warning"
+if ($LogFile) {
+    # Autostart (no window): append everything to the log file as UTF-8.
+    $env:PYTHONUTF8 = "1"
+    $urls = (@("http://localhost:$AppPort") + ($ips | ForEach-Object { "http://${_}:$AppPort" })) -join "  "
+    Add-Content -Path $LogFile -Encoding UTF8 -Value "`r`n===== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') start  $urls"
+    & cmd.exe /c "`"$Python`" $uv >> `"$LogFile`" 2>&1"
+} else {
+    & $Python -m uvicorn server:app --app-dir "$Root\app" --host 0.0.0.0 --port $AppPort --ws none --log-level warning
+}
