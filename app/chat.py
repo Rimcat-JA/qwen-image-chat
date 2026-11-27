@@ -34,6 +34,11 @@ SYSTEM = """あなたは Telegram の Bot の中で動くアシスタントで�
 画像について話しているだけ（感想を聞く、写真の中身を説明してもらう、など）のときはツールを呼ばずに文章で答えます。
 ツールを呼ぶときの返答は、空か一言だけにしてください。"""
 
+# For "/chat": no tool is offered, and the prompt must not mention one either, or the
+# model writes the call out as text ("create_image(...)", "<tool_call>...").
+SYSTEM_TEXT_ONLY = """あなたは Telegram の Bot の中で動くアシスタントです。ユーザーと同じ言語で、自然に短めに答えます。
+このやり取りでは文章だけで答えてください。絵を頼まれた場合は、どんな絵になるかを言葉で描写します。"""
+
 TOOLS = [{
     "type": "function",
     "function": {
@@ -103,7 +108,7 @@ async def ask(conv: dict, text: str, images: list, model: str, allow_tool: bool 
     if images:
         content = [{"type": "text", "text": text or "（写真を送りました）"}] + \
                   [{"type": "image_url", "image_url": {"url": _data_url(p)}} for p in images[:4]]
-    messages = [{"role": "system", "content": SYSTEM}] + history_messages(conv) + \
+    messages = [{"role": "system", "content": SYSTEM if allow_tool else SYSTEM_TEXT_ONLY}] + history_messages(conv) + \
                [{"role": "user", "content": content}]
     body = {"model": model, "messages": messages, "max_tokens": 2000, "temperature": 0.8}
     if allow_tool:
