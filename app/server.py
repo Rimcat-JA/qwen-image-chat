@@ -86,6 +86,11 @@ def size_for(aspect: tuple[float, float], pixels: int) -> tuple[int, int]:
 
 def pick_size(plan: dict, ref_names: list[str], quality: str, aspect_override: str) -> tuple[int, int]:
     pixels = C.QUALITY.get(quality, C.QUALITY["fast"])
+    if ref_names:
+        # Edits attend over the output *and* the reference tokens. At 4 MP that needs a
+        # single 3.2 GB GPU buffer, above what the Vulkan driver allows in one allocation
+        # (16 GB RX 9070 XT), so a "high" edit always fails. Cap edits at ~2 MP.
+        pixels = min(pixels, C.EDIT_MAX_PIXELS)
     ar = aspect_override if aspect_override in C.ASPECTS else plan.get("aspect")
     if ar in C.ASPECTS:
         return size_for(C.ASPECTS[ar], pixels)

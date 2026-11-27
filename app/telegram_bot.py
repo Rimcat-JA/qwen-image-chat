@@ -357,7 +357,9 @@ class Bot:
                             _files={"document": (f"qwen-image-{m['meta'].get('seed')}.png", path.read_bytes(), "image/png")})
         elif kind in ("r", "h"):
             await self.call("answerCallbackQuery", callback_query_id=q["id"],
-                            text="別案を作ります" if kind == "r" else "高精細で作り直します")
+                            text="別案を作ります" if kind == "r" else
+                            ("高精細で作り直します（編集は約2MPまで。数分かかります）"
+                             if m.get("meta", {}).get("mode") == "edit" else "高精細で作り直します"))
             body = {"quality": "high"} if kind == "h" else {}
             res = await self.S.regenerate(cid, mid, body)
             await self.follow(chat_id, q["message"]["message_id"], cid, res["assistant"])

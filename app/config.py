@@ -36,6 +36,8 @@ SD_HOST = _get("sd_host", "127.0.0.1")
 SD_PORT = int(_get("sd_port", 1234))
 SD_URL = f"http://{SD_HOST}:{SD_PORT}"
 APP_PORT = int(_get("app_port", 7860))
+# Largest output size for edits (reference-image jobs); see server.pick_size.
+EDIT_MAX_PIXELS = int(_get("edit_max_pixels", 1440 * 1440))
 # Load all model weights right after start-up with a tiny dummy job (see server.warm_up).
 WARMUP = str(_get("warmup", True)).lower() not in ("0", "false", "no", "off")
 
