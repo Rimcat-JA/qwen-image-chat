@@ -5,6 +5,7 @@ See `local.example.json`. Every key is optional; defaults point inside the repo.
 """
 import json
 import os
+import sys
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
@@ -36,8 +37,67 @@ SD_HOST = _get("sd_host", "127.0.0.1")
 SD_PORT = int(_get("sd_port", 1234))
 SD_URL = f"http://{SD_HOST}:{SD_PORT}"
 APP_PORT = int(_get("app_port", 7860))
-# Largest output size for edits (reference-image jobs); see server.pick_size.
-EDIT_MAX_PIXELS = int(_get("edit_max_pixels", 1440 * 1440))
+
+
+def detect_vram_gb() -> float | None:
+    """Dedicated memory of the largest GPU, in GiB (None if unknown).
+
+    Windows: the display-adapter class key in the registry (works for AMD, NVIDIA and
+    Intel; WMI's AdapterRAM is capped at 4 GB). Linux: nvidia-smi, or amdgpu's sysfs.
+    """
+    sizes: list[int] = []
+    if sys.platform == "win32":
+        import winreg
+        base = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base) as k:
+                for i in range(64):
+                    try:
+                        sub = winreg.EnumKey(k, i)
+                    except OSError:
+                        break
+                    try:
+                        with winreg.OpenKey(k, sub) as s:
+                            v, _ = winreg.QueryValueEx(s, "HardwareInformation.qwMemorySize")
+                            sizes.append(int.from_bytes(v, "little") if isinstance(v, bytes) else int(v))
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    else:
+        import glob
+        import subprocess
+        try:
+            out = subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                                 capture_output=True, text=True, timeout=5).stdout
+            sizes += [int(float(x)) * 1024 ** 2 for x in out.split() if x.strip()]
+        except Exception:  # noqa: BLE001
+            pass
+        for p in glob.glob("/sys/class/drm/card*/device/mem_info_vram_total"):
+            try:
+                sizes.append(int(Path(p).read_text().strip()))
+            except Exception:  # noqa: BLE001
+                pass
+    return round(max(sizes) / 1024 ** 3, 1) if sizes else None
+
+
+# Output-size limits by VRAM. Edits attend over the output *and* the reference
+# tokens, so they need much more memory than text-to-image at the same size: on a
+# 16 GB RX 9070 XT a 4 MP edit needs a single 3.2 GB buffer, above the driver's
+# per-allocation limit, while a 4 MP text-to-image and a ~2 MP edit work.
+# Only the 16 GB tier is measured; the others are conservative estimates.
+# Override with "vram_gb", "max_pixels" or "edit_max_pixels" in local.json.
+VRAM_TIERS = [  # (min GiB, text-to-image max pixels, edit max pixels)
+    (22, 2048 * 2048, 1440 * 1440),
+    (15, 2048 * 2048, 1440 * 1440),   # measured: RX 9070 XT 16 GB
+    (11, 1440 * 1440, 1024 * 1024),
+    (0, 1024 * 1024, 1024 * 1024),
+]
+_vram_cfg = _get("vram_gb", None)
+VRAM_GB = float(_vram_cfg) if _vram_cfg not in (None, "", 0) else detect_vram_gb()
+_tier = next(t for t in VRAM_TIERS if (VRAM_GB if VRAM_GB is not None else 16) >= t[0])
+GEN_MAX_PIXELS = int(_get("max_pixels", _tier[1]))
+EDIT_MAX_PIXELS = int(_get("edit_max_pixels", _tier[2]))
 # Load all model weights right after start-up with a tiny dummy job (see server.warm_up).
 WARMUP = str(_get("warmup", True)).lower() not in ("0", "false", "no", "off")
 
