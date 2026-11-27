@@ -85,12 +85,10 @@ def size_for(aspect: tuple[float, float], pixels: int) -> tuple[int, int]:
 
 
 def pick_size(plan: dict, ref_names: list[str], quality: str, aspect_override: str) -> tuple[int, int]:
-    pixels = C.QUALITY.get(quality, C.QUALITY["fast"])
-    if ref_names:
-        # Edits attend over the output *and* the reference tokens. At 4 MP that needs a
-        # single 3.2 GB GPU buffer, above what the Vulkan driver allows in one allocation
-        # (16 GB RX 9070 XT), so a "high" edit always fails. Cap edits at ~2 MP.
-        pixels = min(pixels, C.EDIT_MAX_PIXELS)
+    # Clamp to what this GPU can do (config.VRAM_TIERS). Edits need far more memory
+    # than text-to-image at the same size, so they have their own, lower limit.
+    pixels = min(C.QUALITY.get(quality, C.QUALITY["fast"]),
+                 C.EDIT_MAX_PIXELS if ref_names else C.GEN_MAX_PIXELS)
     ar = aspect_override if aspect_override in C.ASPECTS else plan.get("aspect")
     if ar in C.ASPECTS:
         return size_for(C.ASPECTS[ar], pixels)
@@ -367,6 +365,9 @@ async def warm_up() -> None:
 
 @app.on_event("startup")
 async def _start_engine() -> None:
+    log.warning("GPU VRAM %s GB -> max %.1f MP (text-to-image), %.1f MP (edit)",
+                C.VRAM_GB if C.VRAM_GB is not None else "unknown",
+                C.GEN_MAX_PIXELS / 1e6, C.EDIT_MAX_PIXELS / 1e6)
     asyncio.create_task(warm_up() if C.WARMUP else sdserver.ensure_running())
     asyncio.create_task(sdserver.watchdog(lambda: GPU_LOCK.locked()))
 
@@ -398,6 +399,8 @@ async def _mark_interrupted() -> None:
 async def api_status():
     sd, ol = await asyncio.gather(sd_status(), ollama_available())
     return {"sd": sd, "ollama": ol, "settings": C.load_settings(), "warm": WARM.get("state"),
+            "gpu": {"vram_gb": C.VRAM_GB, "max_pixels": C.GEN_MAX_PIXELS, "edit_max_pixels": C.EDIT_MAX_PIXELS},
+            "quality": C.QUALITY,
             "models": {k: (C.MODEL_ROOT / v).exists() for k, v in C.MODELS.items()}}
 
 

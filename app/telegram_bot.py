@@ -221,7 +221,10 @@ class Bot:
         elif cmd == "/quality" and arg in C.QUALITY:
             st["quality"] = arg
             self.save_state()
-            await self.call("sendMessage", chat_id=chat_id, text=f"画質を {arg} にしました。")
+            note = ""
+            if C.QUALITY[arg] > C.GEN_MAX_PIXELS:
+                note = f"\n（このPCの VRAM では約{C.GEN_MAX_PIXELS / 1e6:.1f}MP までに抑えて生成します）"
+            await self.call("sendMessage", chat_id=chat_id, text=f"画質を {arg} にしました。{note}")
         elif cmd == "/model" and arg in C.SAMPLING:
             st["model"] = arg
             self.save_state()
@@ -358,8 +361,9 @@ class Bot:
         elif kind in ("r", "h"):
             await self.call("answerCallbackQuery", callback_query_id=q["id"],
                             text="別案を作ります" if kind == "r" else
-                            ("高精細で作り直します（編集は約2MPまで。数分かかります）"
-                             if m.get("meta", {}).get("mode") == "edit" else "高精細で作り直します"))
+                            (f"高精細で作り直します（このPCでは編集は約{C.EDIT_MAX_PIXELS / 1e6:.1f}MPまで。数分かかります）"
+                             if m.get("meta", {}).get("mode") == "edit" else
+                             f"高精細（約{min(C.QUALITY['high'], C.GEN_MAX_PIXELS) / 1e6:.1f}MP）で作り直します"))
             body = {"quality": "high"} if kind == "h" else {}
             res = await self.S.regenerate(cid, mid, body)
             await self.follow(chat_id, q["message"]["message_id"], cid, res["assistant"])

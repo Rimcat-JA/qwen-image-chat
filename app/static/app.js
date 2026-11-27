@@ -41,6 +41,7 @@ async function refreshStatus() {
       : s.warm === "running"
         ? "モデルを読み込み中…（起動直後だけ1〜2分）"
         : "画像エンジン稼働中" + (s.ollama ? " · LLM利用可" : "");
+    applyGpuLimits(s);
     $("#llmToggle").disabled = !s.ollama;
     $("#llmToggle").parentElement.title = s.ollama
       ? "ローカルLLMで指示文を詳しいプロンプトに書き換えます"
@@ -52,6 +53,22 @@ async function refreshStatus() {
     box.className = "status bad";
     box.querySelector(".status-text").textContent = "サーバーに接続できません";
   }
+}
+
+// Quality presets above what this GPU can render are disabled; the server clamps anyway.
+function applyGpuLimits(s) {
+  if (!s.gpu || !s.quality) return;
+  const sel = $("#qualitySelect");
+  for (const opt of sel.options) {
+    opt.dataset.label = opt.dataset.label || opt.textContent;
+    const px = s.quality[opt.value];
+    opt.disabled = px > s.gpu.max_pixels;
+    opt.textContent = opt.dataset.label + (opt.disabled ? "（VRAM不足）" : "");
+  }
+  if (sel.selectedOptions[0]?.disabled) sel.value = "fast";
+  const vram = s.gpu.vram_gb ? `VRAM ${s.gpu.vram_gb}GB` : "VRAM 不明";
+  const mp = (px) => (px / 1e6).toFixed(1) + "MP";
+  sel.parentElement.title = `${vram}: 生成は最大 ${mp(s.gpu.max_pixels)}、編集は最大 ${mp(s.gpu.edit_max_pixels)}`;
 }
 
 function applySettingsToUI() {
