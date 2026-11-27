@@ -90,6 +90,22 @@ VRAM 16GB、RAM 32GB を推奨します。VRAM が少ない GPU では、作れ�
 
 Bot はロングポーリングで動くため、ルーターのポート開放は不要です。Telegram の会話は Web UI の履歴にも表示されます。
 
+### 会話機能（任意・NanoGPT）
+
+`local.json` に [NanoGPT](https://nano-gpt.com/) の API キー（`"nanogpt_api_key"`）を書くと、Bot と普通に会話できるようになります。絵を頼むと、会話 AI が判断して画像生成を呼び出します（OpenAI 互換 API の tool calling）。
+
+| 送るもの | 動き |
+|---|---|
+| 普通の文章・写真 | 会話 AI が答えるか、画像を作る・編集するかを判断します |
+| `/image 〜` | 必ず画像を作ります（写真付きなら編集）。会話 AI は使いません |
+| `/chat 〜` | 必ず文章で答えます。画像は作りません |
+| `/llm` | 会話に使うモデルの一覧と切り替え（そのチャットだけに適用。`/llm default` で既定に戻す） |
+
+- 既定のモデルは `nanogpt_model` で決めます（初期値 `z-ai/glm-5.3-flash-uncensored`）。`/llm` の選択肢は、`nanogpt_model_choices` に `{"名前": "モデルID"}` を書くと増やせます。
+- NanoGPT のサブスクに含まれるモデルはサブスクの範囲で、含まれないモデルは残高から請求されます。API キーを「Subscription only」にしておくと、残高を使うリクエストは拒否されます。
+- 会話と画像は同じ会話履歴に入るので、「さっきの絵をもっと明るく」のように、会話と画像をまたいだ依頼も通じます。
+- API キーがない場合は、これまでどおり画像生成だけの Bot として動きます。
+
 ## PC の起動時に自動で動かす
 
 `install-autostart.bat` を一度実行すると、Windows にログインした約30秒後に、アプリ（Web UI・Telegram Bot・画像エンジン）がウィンドウなしで起動します。タスク スケジューラに `QwenImageChat` という名前で登録されます。管理者権限は不要です。
@@ -113,6 +129,9 @@ Bot はロングポーリングで動くため、ルーターのポート開放�
 | `vram_gb` | 自動検出 | GPU の VRAM 容量（GB）。解像度の上限の決定に使う |
 | `max_pixels` / `edit_max_pixels` | VRAM から自動 | 新規生成 / 編集の画素数の上限（例: `2073600` = 1440×1440） |
 | `warmup` | `true` | 起動直後に小さなダミー生成でモデルを読み込んでおく（最初の1枚も待たずに済む） |
+| `nanogpt_api_key` | `""` | NanoGPT の API キー（会話機能。空なら画像生成のみ） |
+| `nanogpt_model` | `z-ai/glm-5.3-flash-uncensored` | 会話に使う既定のモデル |
+| `nanogpt_base_url` | `https://api.nano-gpt.com/api/v1` | NanoGPT の API の URL |
 | `telegram_notify_users` | 許可リストの先頭のID | アプリ起動時に「🟢 起動しました」を送る相手（`[]` で通知しない） |
 
 画質プリセット（UI と Telegram で切り替え）:

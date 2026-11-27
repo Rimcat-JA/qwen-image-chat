@@ -119,6 +119,24 @@ if isinstance(_notify, str):
     _notify = [x for x in _notify.replace(" ", "").split(",") if x]
 TELEGRAM_NOTIFY = [int(x) for x in _notify]
 
+# Conversation (text chat) through NanoGPT's OpenAI-compatible API. Without a key the
+# bot stays image-only. /api/v1 bills subscription-included models to the
+# subscription and anything else to the balance (unless the key is "Subscription only").
+NANOGPT_API_KEY = str(_get("nanogpt_api_key", "") or "")
+NANOGPT_BASE_URL = str(_get("nanogpt_base_url", "https://api.nano-gpt.com/api/v1")).rstrip("/")
+NANOGPT_MODEL = str(_get("nanogpt_model", "z-ai/glm-5.3-flash-uncensored"))
+# Shown by /llm in Telegram: short name -> (model id, label). All have vision and tool
+# calling. Ones not included in the NanoGPT subscription are billed to the balance.
+NANOGPT_MODEL_CHOICES = {
+    "glm": ("z-ai/glm-5.3-flash-uncensored", "GLM 5.3 Flash Uncensored（サブスク）"),
+    "heretic": ("pqhaz/DeepSeek-V4.1-Flash-1017-heretic", "DeepSeek V4.1 Flash Heretic（サブスク）"),
+    "deepseek": ("deepseek/deepseek-v4.1-flash-1017-uncensored", "DeepSeek V4.1 Flash 1017 Uncensored（従量課金）"),
+}
+_extra = _get("nanogpt_model_choices", {})  # {"name": "model/id"} in local.json adds more
+if isinstance(_extra, dict):
+    NANOGPT_MODEL_CHOICES.update({k: (v, v) for k, v in _extra.items()})
+CHAT_HISTORY_TURNS = int(_get("chat_history_turns", 20))
+
 # Component files (relative to MODEL_ROOT). These IDs double as sd-server
 # model-file IDs because MODEL_ROOT is the first --model-dir root.
 MODELS = {
