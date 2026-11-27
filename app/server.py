@@ -299,8 +299,10 @@ def describe(meta: dict) -> str:
 
 # ---------------------------------------------------------------- planning
 def previous_image(conv: dict) -> str | None:
+    # The latest picture in the chat: a generated one, or a photo the user sent
+    # (e.g. one they first only talked about with the chat AI).
     for m in reversed(conv["messages"]):
-        if m["role"] == "assistant" and m.get("images"):
+        if m.get("images"):
             return m["images"][-1]
     return None
 
@@ -325,7 +327,10 @@ def make_plan(conv: dict, text: str, attachments: list[str], forced: str) -> dic
 
 
 def user_history(conv: dict) -> list[str]:
-    return [m["text"] for m in conv["messages"] if m["role"] == "user" and m.get("text")]
+    """Earlier image requests (context for the prompt enhancer); plain chat turns are skipped."""
+    msgs = conv["messages"]
+    return [m["text"] for i, m in enumerate(msgs) if m["role"] == "user" and m.get("text")
+            and not (i + 1 < len(msgs) and (msgs[i + 1].get("meta") or {}).get("mode") == "chat")]
 
 
 # ---------------------------------------------------------------- API

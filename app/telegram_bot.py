@@ -17,6 +17,7 @@ from pathlib import Path
 
 import httpx
 
+import chat
 import config as C
 
 log = logging.getLogger("telegram")
@@ -24,7 +25,7 @@ API = f"https://api.telegram.org/bot{C.TELEGRAM_TOKEN}"
 FILE_API = f"https://api.telegram.org/file/bot{C.TELEGRAM_TOKEN}"
 STATE_FILE = C.DATA_DIR / "telegram.json"
 
-HELP = """🎨 Qwen-Image-2.1 画像生成ボット
+HELP_IMAGE = """🎨 Qwen-Image-2.1 画像生成ボット
 
 • 文章を送る → 画像を生成
 • 写真を送る（キャプションに指示）→ その写真を編集
@@ -33,12 +34,53 @@ HELP = """🎨 Qwen-Image-2.1 画像生成ボット
 • 「横長」「縦長」「16:9」などで比率を指定
 
 コマンド
+/new 新しい会話を始める"""
+
+HELP_CHAT = """💬 会話もできる画像生成ボット
+
+• 普通に話しかける → AI が答えます。絵を頼むと、AI が判断して画像を作ります
+• 写真を送る → 写真について話すことも、キャプションの指示で編集することもできます
+• 生成後に「もっと明るく」など → 直前の画像を編集
+• 「横長」「縦長」「16:9」などで比率を指定
+
+どちらかに決めたいときは先頭にコマンド
+/image 〜 必ず画像を作る（写真付きなら編集）
+/chat 〜 必ず文章で答える（画像は作らない）
+
+コマンド
 /new 新しい会話を始める
+/llm 会話に使う AI モデルを選ぶ"""
+
+HELP_COMMON = """
 /quality fast|standard|high 画質（約1MP/2MP/4MP）
 /model turbo|base 高速/高品質モデル
 /enhance on|off プロンプト強化
 /settings 現在の設定"""
 
+
+def split_force(text: str) -> tuple[str | None, str]:
+    """'/image 猫' -> ('image', '猫'); '/chat@bot 質問' -> ('chat', '質問'); else (None, text)."""
+    head, _, rest = text.partition(" ")
+    if "\n" in head:
+        head, _, more = head.partition("\n")
+        rest = more + (" " + rest if rest else "")
+    cmd = head.split("@")[0].lower()
+    if cmd in ("/image", "/img"):
+        return "image", rest.strip()
+    if cmd == "/chat":
+        return "chat", rest.strip()
+    return None, text
+
+
+def help_text() -> str:
+    return (HELP_CHAT if chat.enabled() else HELP_IMAGE) + HELP_COMMON
+
+
+COMMANDS_CHAT = [
+    {"command": "image", "description": "必ず画像を作る: /image 指示"},
+    {"command": "chat", "description": "必ず文章で答える: /chat 質問"},
+    {"command": "llm", "description": "会話に使う AI モデルを選ぶ"},
+]
 COMMANDS = [
     {"command": "new", "description": "新しい会話を始める"},
     {"command": "quality", "description": "画質: fast / standard / high"},
@@ -132,7 +174,7 @@ class Bot:
             return
         log.warning("Telegram bot @%s started (allowed users: %s)", me.get("username"),
                     sorted(C.TELEGRAM_ALLOWED) or "none yet")
-        await self.call("setMyCommands", commands=COMMANDS)
+        await self.call("setMyCommands", commands=(COMMANDS_CHAT if chat.enabled() else []) + COMMANDS)
         for uid in C.TELEGRAM_NOTIFY:
             await self.call("sendMessage", chat_id=uid, disable_notification=False,
                             text=f"🟢 起動しました（{time.strftime('%m/%d %H:%M')}）。画像の生成・編集を受け付けています。")
@@ -178,7 +220,7 @@ class Bot:
             return
 
         text = (m.get("text") or m.get("caption") or "").strip()
-        if text.startswith("/"):
+        if text.startswith("/") and split_force(text)[0] is None:
             await self.on_command(chat_id, text)
             return
 
@@ -214,7 +256,7 @@ class Bot:
         arg = arg.strip().lower()
         st = self.chat_state(chat_id)
         if cmd in ("/start", "/help"):
-            await self.call("sendMessage", chat_id=chat_id, text=HELP)
+            await self.call("sendMessage", chat_id=chat_id, text=help_text())
         elif cmd == "/new":
             self.new_conv(chat_id)
             await self.call("sendMessage", chat_id=chat_id, text="🆕 新しい会話を始めました。何を描きましょう？")
@@ -233,24 +275,102 @@ class Bot:
             st["use_llm"] = arg == "on"
             self.save_state()
             await self.call("sendMessage", chat_id=chat_id, text=f"プロンプト強化を {arg} にしました。")
+        elif cmd == "/llm" and chat.enabled():
+            await self.on_llm(chat_id, st, text.partition(" ")[2].strip())
         elif cmd == "/settings":
-            await self.call("sendMessage", chat_id=chat_id, text=(
-                f"モデル: {st['model']}\n画質: {st['quality']}\nプロンプト強化: {'on' if st['use_llm'] else 'off'}"))
+            lines = [f"画像モデル: {st['model']}", f"画質: {st['quality']}",
+                     f"プロンプト強化: {'on' if st['use_llm'] else 'off'}"]
+            if chat.enabled():
+                lines.append(f"会話 AI: {chat.model_label(st.get('llm') or C.NANOGPT_MODEL)}"
+                             + ("" if st.get("llm") else "（既定）"))
+            await self.call("sendMessage", chat_id=chat_id, text="\n".join(lines))
         else:
-            await self.call("sendMessage", chat_id=chat_id, text="不明なコマンドです。\n\n" + HELP)
+            await self.call("sendMessage", chat_id=chat_id, text="不明なコマンドです。\n\n" + help_text())
+
+    async def on_llm(self, chat_id: int, st: dict, arg: str) -> None:
+        """/llm            -> list the models
+           /llm glm        -> use a listed model (or any NanoGPT model id) in this chat
+           /llm default    -> back to the default from local.json"""
+        if arg.lower() in ("default", "既定", "reset"):
+            st.pop("llm", None)
+            self.save_state()
+            await self.call("sendMessage", chat_id=chat_id,
+                            text=f"会話 AI を既定（{chat.model_label(C.NANOGPT_MODEL)}）に戻しました。")
+            return
+        if arg:
+            mid = C.NANOGPT_MODEL_CHOICES.get(arg.lower(), (arg, arg))[0]
+            st["llm"] = mid
+            self.save_state()
+            await self.call("sendMessage", chat_id=chat_id, text=f"会話 AI を {chat.model_label(mid)} にしました。")
+            return
+        current = st.get("llm") or C.NANOGPT_MODEL
+        lines = ["会話に使う AI モデル（このチャットだけに適用）", ""]
+        for name, (mid, label) in C.NANOGPT_MODEL_CHOICES.items():
+            mark = "▶ " if mid == current else "　 "
+            lines.append(f"{mark}/llm {name} — {label}" + ("  ※既定" if mid == C.NANOGPT_MODEL else ""))
+        lines += ["", "/llm default で既定に戻します。NanoGPT のモデル ID を直接指定することもできます。"]
+        await self.call("sendMessage", chat_id=chat_id, text="\n".join(lines))
+
+    async def send_text(self, chat_id: int, text: str, reply_to: int | None = None) -> None:
+        for i in range(0, len(text), 4000):  # Telegram's limit is 4096 characters
+            params = {"chat_id": chat_id, "text": text[i:i + 4000]}
+            if reply_to and i == 0:
+                params["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
+            await self.call("sendMessage", **params)
+
+    async def _typing(self, chat_id: int, stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            await self.call("sendChatAction", chat_id=chat_id, action="typing")
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=4.5)
+            except asyncio.TimeoutError:
+                pass
 
     async def turn(self, chat_id: int, reply_to: int, text: str, file_ids: list[str]) -> None:
-        await self.call("sendChatAction", chat_id=chat_id, action="upload_photo")
+        # "/image ..." always makes a picture, "/chat ..." always answers in text;
+        # anything else is decided by the LLM (when a NanoGPT key is configured).
+        force, text = split_force(text)
         names = []
         for fid in file_ids[:10]:
             n = await self.download_photo(fid)
             if n:
                 names.append(n)
         if not text and not names:
+            if force:
+                await self.call("sendMessage", chat_id=chat_id, text=f"使い方: /{force} の後に続けて書いてください。")
             return
         st = self.chat_state(chat_id)
         cid = self.conv_id(chat_id)
-        opts = {"mode": "auto", "aspect": "auto", "quality": st["quality"], "model": st["model"],
+        mode = "auto"
+        if force == "chat" and not chat.enabled():
+            await self.call("sendMessage", chat_id=chat_id,
+                            text="会話機能は設定されていません（local.json の nanogpt_api_key）。")
+            return
+        if force != "image" and chat.enabled():
+            model = st.get("llm") or C.NANOGPT_MODEL
+            stop = asyncio.Event()
+            typing = asyncio.create_task(self._typing(chat_id, stop))
+            try:
+                res = await chat.ask(self.S.load_conv(cid), text, [C.IMG_DIR / n for n in names], model,
+                                     allow_tool=force is None)
+            except Exception as e:  # noqa: BLE001
+                log.warning("chat failed: %s", e)
+                await self.send_text(chat_id, f"⚠️ 会話 AI でエラーが起きました: {e}", reply_to)
+                return
+            finally:
+                stop.set()
+                await typing
+            if not res["image"]:
+                answer = res["text"] or "（返答が空でした）"
+                async with self.S.lock_for(cid):
+                    chat.record_chat(self.S, cid, text, names, answer, model)
+                await self.send_text(chat_id, answer, reply_to)
+                return
+            if res["text"]:
+                await self.send_text(chat_id, res["text"], reply_to)
+            text, mode = res["image"]["instruction"], res["image"]["mode"]
+        await self.call("sendChatAction", chat_id=chat_id, action="upload_photo")
+        opts = {"mode": mode, "aspect": "auto", "quality": st["quality"], "model": st["model"],
                 "use_llm": st["use_llm"]}
         res = await self.S.submit_turn(cid, text, names, opts)
         await self.follow(chat_id, reply_to, cid, res["assistant"])
