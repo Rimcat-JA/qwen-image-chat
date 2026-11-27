@@ -26,19 +26,44 @@ import config as C
 
 log = logging.getLogger("chat")
 
-SYSTEM = """あなたは Telegram の Bot の中で動くアシスタントです。普通の質問や雑談には、ユーザーと同じ言語で、自然に短めに答えます。
-この Bot は、ローカルの画像生成モデル Qwen-Image-2.1 で画像を「新しく作る」ことと「編集する」ことができます。
-ユーザーが画像を描いてほしい・作ってほしい・変えてほしいときは、文章で説明せずに create_image ツールを呼んでください。
-- 直前に作った画像や添付された写真への変更依頼（「もっと明るく」「背景を夜に」「この猫に帽子を」など）は mode="edit"。
-- それ以外の新しい絵は mode="generate"。
-- instruction には、会話の流れを踏まえて、それだけで意味が通じる画像の指示を書きます。ユーザーの言語のまま書き、「」で囲まれた文字やロゴの文言は一字一句そのまま残します。
-画像について話しているだけ（感想を聞く、写真の中身を説明してもらう、など）のときはツールを呼ばずに文章で答えます。
-ツールを呼ぶときの返答は、空か一言だけにしてください。"""
+# The prompts are in English so they work the same for users of any language; the
+# model is told to answer in the user's language.
+#
+# PERSONA: who the assistant is and how it answers. Can be replaced with
+# "chat_persona" in local.json. The image-tool rules below are kept separately,
+# so changing the persona cannot break when an image gets made.
+PERSONA = """You are a technical assistant inside a Telegram bot. Your job is to help the user get any technical task done: programming and debugging, shell and OS administration, networking, hardware, cloud and DevOps, data and math, and explaining technical concepts.
+
+How to answer:
+- Answer the question directly. Put the answer itself (the command, the code, the value, yes/no) in the first line or block. No preamble, no restating the question, no closing offers or summaries.
+- Be as short as the question allows. Add explanation only when it is needed to use the answer correctly or safely, or when the user asks why.
+- When a task needs steps, give numbered steps with the exact commands or code, ready to copy.
+- If the request is ambiguous, pick the most likely meaning, answer it, and state the assumption in one short line. Ask a question only when no reasonable answer is possible without it.
+- Say plainly when you are not sure or when something depends on a version or environment. Do not invent commands, flags, APIs or facts.
+- Warn in one line before anything destructive or irreversible (deleting data, force-pushing, changing system settings).
+- Always reply in the language of the user's latest message.
+
+Formatting (Telegram shows plain text): use ``` code blocks for code, commands and file contents, and `inline code` for names and short commands. Do not use headings, tables or bold."""
+
+IMAGE_RULES = """
+
+This bot can also create and edit images with a local image model (Qwen-Image-2.1), through the create_image tool.
+- When the user wants a picture drawn, created or changed, call create_image instead of describing it in text.
+- mode="edit" for changes to the last generated image or to the attached photo(s) ("make it brighter", "night background", "put a hat on this cat", "show the front"). Otherwise mode="generate".
+- instruction: a self-contained image instruction that makes sense on its own, using the conversation so far. Write it in the user's language. Copy any text the user wants shown in the image (quoted words, signs, logos) exactly, character for character.
+- If the user is only talking about an image (asking what is in a photo, asking for an opinion), answer in text and do not call the tool.
+- When you call the tool, reply with nothing or one short sentence."""
 
 # For "/chat": no tool is offered, and the prompt must not mention one either, or the
 # model writes the call out as text ("create_image(...)", "<tool_call>...").
-SYSTEM_TEXT_ONLY = """あなたは Telegram の Bot の中で動くアシスタントです。ユーザーと同じ言語で、自然に短めに答えます。
-このやり取りでは文章だけで答えてください。絵を頼まれた場合は、どんな絵になるかを言葉で描写します。"""
+TEXT_ONLY_RULES = """
+
+In this conversation, answer in text only. If the user asks for a picture, describe it in words."""
+
+
+def system_prompt(with_tools: bool) -> str:
+    persona = C.CHAT_PERSONA or PERSONA
+    return persona + (IMAGE_RULES if with_tools else TEXT_ONLY_RULES)
 
 TOOLS = [{
     "type": "function",
@@ -151,10 +176,10 @@ async def ask(conv: dict, text: str, images: list, model: str, allow_tool: bool 
     if images:
         content = [{"type": "text", "text": text or "（写真を送りました）"}] + \
                   [{"type": "image_url", "image_url": {"url": _data_url(p)}} for p in images[:4]]
-    messages = [{"role": "system", "content": SYSTEM if allow_tool else SYSTEM_TEXT_ONLY}] + \
+    messages = [{"role": "system", "content": system_prompt(allow_tool)}] + \
                history_messages(conv, with_tools=allow_tool) + \
                [{"role": "user", "content": content}]
-    body = {"model": model, "messages": messages, "max_tokens": 2000, "temperature": 0.8}
+    body = {"model": model, "messages": messages, "max_tokens": 4000, "temperature": 0.4}
     if allow_tool:
         body["tools"] = TOOLS
         body["tool_choice"] = "auto"

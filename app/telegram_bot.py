@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -70,6 +71,48 @@ def split_force(text: str) -> tuple[str | None, str]:
     if cmd == "/chat":
         return "chat", rest.strip()
     return None, text
+
+
+def _esc(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def markdown_to_html(text: str) -> str:
+    """The little Markdown an LLM uses -> Telegram HTML: ```lang blocks, `code`, **bold**."""
+    out = []
+    for i, part in enumerate(re.split(r"```", text)):
+        if i % 2:  # inside a fence: first line may name the language
+            lang, nl, body = part.partition("\n")
+            if not nl or not re.fullmatch(r"[\w+#.-]{0,20}", lang.strip()):
+                lang, body = "", part
+            body = body.strip("\n")
+            cls = f' class="language-{_esc(lang.strip())}"' if lang.strip() else ""
+            out.append(f"<pre><code{cls}>{_esc(body)}</code></pre>")
+        else:
+            s = _esc(part)
+            s = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", s)
+            s = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", s)
+            out.append(s)
+    return "".join(out)
+
+
+def split_markdown(text: str, limit: int = 3500) -> list[str]:
+    """Split into Telegram-sized messages at line breaks, closing and reopening a ```
+    block that spans two messages."""
+    chunks, cur, fence = [], "", None
+    for line in text.split("\n"):
+        if len(cur) + len(line) + 1 > limit and cur:
+            chunks.append(cur + ("\n```" if fence is not None else ""))
+            cur = ("```" + fence + "\n") if fence is not None else ""
+        while len(line) > limit:  # a single huge line
+            chunks.append(cur + line[:limit])
+            cur, line = "", line[limit:]
+        cur += line + "\n"
+        if line.strip().startswith("```"):
+            fence = None if fence is not None else line.strip()[3:]
+    if cur.strip():
+        chunks.append(cur.rstrip("\n"))
+    return chunks or [text]
 
 
 def help_text() -> str:
@@ -312,11 +355,17 @@ class Bot:
         await self.call("sendMessage", chat_id=chat_id, text="\n".join(lines))
 
     async def send_text(self, chat_id: int, text: str, reply_to: int | None = None) -> None:
-        for i in range(0, len(text), 4000):  # Telegram's limit is 4096 characters
-            params = {"chat_id": chat_id, "text": text[i:i + 4000]}
+        """Send an LLM answer: ``` blocks become Telegram code blocks (monospace, tap to copy).
+        Falls back to plain text if Telegram rejects the formatting."""
+        for i, chunk in enumerate(split_markdown(text)):
+            params = {"chat_id": chat_id, "text": markdown_to_html(chunk), "parse_mode": "HTML",
+                      "link_preview_options": {"is_disabled": True}}
             if reply_to and i == 0:
                 params["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
-            await self.call("sendMessage", **params)
+            if not await self.call("sendMessage", **params):
+                params.pop("parse_mode")
+                params["text"] = chunk
+                await self.call("sendMessage", **params)
 
     async def _typing(self, chat_id: int, stop: asyncio.Event) -> None:
         while not stop.is_set():
