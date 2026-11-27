@@ -74,7 +74,7 @@ def prefetch(model: str) -> float:
     return time.time() - t
 
 
-async def ensure_running(model: str | None = None, timeout: float = 90) -> bool:
+async def ensure_running(model: str | None = None, timeout: float = 90, force: bool = False) -> bool:
     """Start sd-server if it isn't reachable, or restart it with another diffusion model.
 
     Switching Turbo <-> Base inside a running sd-server keeps the old weights in VRAM
@@ -86,9 +86,9 @@ async def ensure_running(model: str | None = None, timeout: float = 90) -> bool:
     async with _lock:
         want = model or current_model
         if port_open():
-            if want == current_model or not owned():
+            if not owned() or (want == current_model and not force):
                 return True
-            log.warning("switching sd-server model %s -> %s", current_model, want)
+            log.warning("restarting sd-server (%s -> %s)", current_model, want)
             _proc.terminate()
             try:
                 _proc.wait(timeout=15)

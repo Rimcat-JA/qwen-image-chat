@@ -205,11 +205,14 @@ async def _run_job(cid: str, mid: str, plan: dict, refs: list[str], opts: dict,
             if not await sdserver.ensure_running(model):
                 raise RuntimeError("画像エンジンを再起動できませんでした") from e
             j = await sd_generate(payload, live, t0)
-        err = str((j.get("error") or {}).get("message", ""))
-        if j["status"] == "failed" and "memory" in err.lower():
+        if j["status"] == "failed" and sdserver.owned():
+            # A failed job can leave sd-server unusable: e.g. after a Vulkan "device lost"
+            # (GPU reset) every later job fails with "VAE encode failed". Start a fresh
+            # sd-server (new GPU context) and retry once, whatever the message was.
+            err = str((j.get("error") or {}).get("message", ""))
+            log.warning("job failed (%s); restarting sd-server and retrying once", err)
             live.update(status="queued", stage="loading", preview=None)
-            await asyncio.sleep(3)
-            if await sdserver.ensure_running(model):
+            if await sdserver.ensure_running(model, force=True):
                 j = await sd_generate(payload, live, t0)
         if j["status"] == "completed":
             imgs = [save_image_bytes(base64.b64decode(im["b64_json"])) for im in j["result"]["images"]]
