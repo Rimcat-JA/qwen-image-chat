@@ -136,6 +136,9 @@ _extra = _get("nanogpt_model_choices", {})  # {"name": "model/id"} in local.json
 if isinstance(_extra, dict):
     NANOGPT_MODEL_CHOICES.update({k: (v, v) for k, v in _extra.items()})
 CHAT_HISTORY_TURNS = int(_get("chat_history_turns", 20))
+# Replaces the assistant's persona (who it is, how it answers); see chat.PERSONA.
+# The rules for when to make an image are always added after it.
+CHAT_PERSONA = str(_get("chat_persona", "") or "")
 
 # Component files (relative to MODEL_ROOT). These IDs double as sd-server
 # model-file IDs because MODEL_ROOT is the first --model-dir root.
