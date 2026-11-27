@@ -124,7 +124,7 @@ TELEGRAM_NOTIFY = [int(x) for x in _notify]
 # subscription and anything else to the balance (unless the key is "Subscription only").
 NANOGPT_API_KEY = str(_get("nanogpt_api_key", "") or "")
 NANOGPT_BASE_URL = str(_get("nanogpt_base_url", "https://api.nano-gpt.com/api/v1")).rstrip("/")
-NANOGPT_MODEL = str(_get("nanogpt_model", "z-ai/glm-5.3-flash-uncensored"))
+NANOGPT_MODEL = str(_get("nanogpt_model", "pqhaz/DeepSeek-V4.1-Flash-1017-heretic"))
 # Shown by /llm in Telegram: short name -> (model id, label). All have vision and tool
 # calling. Ones not included in the NanoGPT subscription are billed to the balance.
 NANOGPT_MODEL_CHOICES = {
